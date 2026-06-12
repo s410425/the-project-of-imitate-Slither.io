@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Snake.io Arena - 完整功能版</title>
+    <title>Snake.io Arena - 完整功能修正版</title>
     <style>
         body { margin: 0; overflow: hidden; background: #050505; font-family: 'Segoe UI', sans-serif; user-select: none; }
         canvas { display: block; }
@@ -37,7 +37,7 @@
 
 <div id="menu">
     <h1 style="color:#0f4">SNAKE.IO <span style="color:white">ARENA</span></h1>
-    <p style="color:#888">模式專屬排行榜 | AI 名稱修正</p>
+    <p style="color:#888">模式專屬排行榜 | AI 競技對決</p>
 
     <div class="input-box" style="margin-top: 30px;">
         <p style="color: #888; margin-bottom: 10px;">ENTER YOUR NAME</p>
@@ -89,7 +89,7 @@ let currentMode = 'evo';
 let currentMagnetLimit = 3000;
 let camera = { x: 0, y: 0, zoom: 1 };
 let foods = [], ai_bots = [], toDie = [];
-let mouse = { x: 0, y: 0, down: false }, keys = {};
+let mouse = { x: window.innerWidth / 2, y: window.innerHeight / 2, down: false };
 let playerName = "GUEST";
 let player;
 
@@ -98,7 +98,8 @@ function selectMode(mode, magnet) {
     currentMode = mode;
     currentMagnetLimit = magnet;
     document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('active'));
-    document.getElementById(`card-${mode}`).classList.add('active');
+    const targetCard = document.getElementById(`card-${mode}`);
+    if (targetCard) targetCard.classList.add('active');
     updatePermanentUI();
 }
 
@@ -144,7 +145,7 @@ class Snake {
         this.angle = Math.random() * Math.PI * 2;
         this.dead = false;
         
-        this.name = isPlayer ? playerName : (currentMode === 'online' ? "PLAYER_" + Math.floor(Math.random()*999) : "AI_BOT");
+        this.name = isPlayer ? playerName : (currentMode === 'online' ? "PLAYER_" + Math.floor(Math.random()*999) : "AI_BOT_" + Math.floor(Math.random()*999));
 
         // 初始化身體節點
         for (let i = 0; i < this.length; i += 5) {
@@ -186,6 +187,7 @@ class Snake {
     }
 
     draw() {
+        if (this.body.length === 0) return;
         ctx.save();
         let width = this.getWidth();
 
@@ -246,8 +248,10 @@ function spawnAI() {
     ai_bots.push(new Snake((Math.random()-0.5)*MAP*2, (Math.random()-0.5)*MAP*2, `hsl(${Math.random()*360}, 75%, 60%)`, false, startLen));
 }
 
+// 全局單一主循環
 function loop() {
-    if (!started) return;
+    requestAnimationFrame(loop);
+    if (!started) return; // 如果沒開始，就只是空轉，避免多重疊加問題
 
     // 清空與重繪畫布
     ctx.fillStyle = "#050505";
@@ -285,7 +289,7 @@ function loop() {
 
     let magnetRange = Math.min(currentMagnetLimit, 10 * player.length);
 
-    // 食物與磁力吸收處理
+    // 食物與玩家磁力吸收處理
     for (let i = foods.length - 1; i >= 0; i--) {
         let f = foods[i];
         let fdx = player.body[0].x - f.x, fdy = player.body[0].y - f.y;
@@ -293,8 +297,8 @@ function loop() {
 
         // 磁力吸入效果
         if (dist < magnetRange) {
-            f.x += (fdx / dist) * 8;
-            f.y += (fdy / dist) * 8;
+            f.x += (fdx / (dist || 1)) * 8;
+            f.y += (fdy / (dist || 1)) * 8;
         }
 
         // 吃掉食物
@@ -315,21 +319,34 @@ function loop() {
     player.update();
     if (Math.abs(player.body[0].x) > MAP || Math.abs(player.body[0].y) > MAP) player.dead = true;
 
-    // AI 行為與碰撞邏輯
+    // AI 行為、覓食與碰撞邏輯
     ai_bots.forEach(s => {
-        // 隨機轉向去吃最近的食物（簡單AI模擬）
-        if (Math.random() > 0.98 && foods.length > 0) {
+        // 尋找地圖上的隨機食物前進（簡單AI模擬）
+        if (Math.random() > 0.97 && foods.length > 0) {
             let target = foods[Math.floor(Math.random()*foods.length)];
             s.angle = Math.atan2(target.y - s.body[0].y, target.x - s.body[0].x);
         }
         s.update();
         if (Math.abs(s.body[0].x) > MAP || Math.abs(s.body[0].y) > MAP) s.dead = true;
         
+        // AI 吃食物判定
+        for (let i = foods.length - 1; i >= 0; i--) {
+            let f = foods[i];
+            let afdx = s.body[0].x - f.x, afdy = s.body[0].y - f.y;
+            let adist = Math.sqrt(afdx*afdx + afdy*afdy);
+            if (adist < s.getWidth() * 0.6) {
+                s.length += f.size * 1.5;
+                foods.splice(i, 1);
+                spawnFood();
+            }
+        }
+
         // AI 撞擊其它蛇身判定
         [player, ...ai_bots].forEach(other => {
             if (other === s || other.dead) return;
             let h = s.body[0];
             let minDist = (s.getWidth() + other.getWidth()) * 0.45;
+            // 抽樣檢測身體節點，優化性能
             for (let j = 0; j < other.body.length; j += 10) {
                 let odx = h.x - other.body[j].x, ody = h.y - other.body[j].y;
                 if (odx*odx + ody*ody < minDist * minDist) s.dead = true;
@@ -351,7 +368,9 @@ function loop() {
     if (player.dead) { 
         saveRecord(player.length); 
         alert(`遊戲結束！你的最終分數為: ${Math.floor(player.length)}`);
-        initGame(); 
+        exitToMenu(); 
+        ctx.restore();
+        return;
     }
 
     toDie.forEach(s => {
@@ -378,8 +397,6 @@ function loop() {
     let ranking = [player, ...ai_bots].sort((a,b)=>b.length - a.length).slice(0, 8);
     document.getElementById("ui-layer").innerHTML = `<b>🏆 ${currentMode.toUpperCase()} RANK</b><hr>` + 
         ranking.map((s,i)=>`<div style="color:${s.isPlayer?'#0f4':'#fff'}">${i+1}. ${s.name} <span style="float:right">${Math.floor(s.length)}</span></div>`).join("");
-    
-    requestAnimationFrame(loop);
 }
 
 function startGame() {
@@ -388,33 +405,36 @@ function startGame() {
     initGame();
     started = true;
     document.getElementById("menu").style.display = "none";
-    loop();
 }
 
 function exitToMenu() {
-    if (!started) return;
-    saveRecord(player.length);
     started = false;
     document.getElementById("menu").style.display = "flex";
+    updatePermanentUI();
 }
 
 // 監聽鍵盤與滑鼠事件
 window.addEventListener("keydown", e => {
-    keys[e.key] = true;
     if (e.key === "Escape") exitToMenu();
 });
-window.addEventListener("keyup", e => keys[e.key] = false);
 
-window.addEventListener("mousemove", e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+window.addEventListener("mousemove", e => { 
+    mouse.x = e.clientX; 
+    mouse.y = e.clientY; 
+});
 window.addEventListener("mousedown", () => mouse.down = true);
 window.addEventListener("mouseup", () => mouse.down = false);
 
-function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+function resize() { 
+    canvas.width = window.innerWidth; 
+    canvas.height = window.innerHeight; 
+}
 window.addEventListener('resize', resize);
 
 // 初始化執行
 resize();
 selectMode('evo', 3000);
+loop(); // 啟動唯一的全局渲染計時器
 </script>
 </body>
 </html>
